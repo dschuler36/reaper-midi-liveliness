@@ -34,48 +34,63 @@ function get_random_vel(min_vel, max_vel)
 end
 
 function get_altered_pos(startppqposOut, endppqPosOut)
-  -- representing altering position of 80% of notes
   altering_these_values = {1, 2, 3, 4, 5, 6, 7, 8}
   random_num = math.random(1, 10)
   if has_value(altering_these_values, random_num) then
     alter_amt = math.random(-10, 10)
-    -- if number is even, alter it's start. if odd, alter its end
     if (random_num % 2 == 0) then
       startppqposOut = startppqposOut + alter_amt
     else
       endppqPosOut = endppqPosOut + alter_amt
     end
   end
+
+  -- Ensure start < end (minimum length of 1 tick)
+  if startppqposOut >= endppqPosOut then
+    endppqPosOut = startppqposOut + 1
+  end
+
   return startppqposOut, endppqPosOut
 end
-
       
 function make_midi_lively()
-  hwnd = reaper.MIDIEditor_GetActive()
+  local hwnd = reaper.MIDIEditor_GetActive()
   if not hwnd then
     reaper.ShowMessageBox("Please ensure MIDI notes are selected first!", "Error", 0)
+    return
   end
-  take = reaper.MIDIEditor_GetTake(hwnd)
-  retval, notes, ccs, sysex = reaper.MIDI_CountEvts(take)
-  min_vel = GUI.Val("min_velocity_tb")
-  max_vel = GUI.Val("max_velocity_tb")
-  -- Returns number of selection starting from 1 (not the text value)
-  alter_pos = GUI.Val("alter_pos_radio")
-  for n = 0, notes-1 do
-    retval, sel, muted, startppqposOut, endppqPosOut, chan, pitch, vel = reaper.MIDI_GetNote(take, n)
-    if sel == true then
-        random_vel = get_random_vel(min_vel, max_vel)
-        if alter_pos == 1 then
-          startppqposOut_altered, endppqPosOut_altered = get_altered_pos(startppqposOut, endppqPosOut)
-        else
-          startppqposOut_altered = startppqposOut
-          endppqPosOut_altered = endppqPosOut
-        end
-        reaper.MIDI_SetNote(take, n, sel, muted, startppqposOut_altered, endppqPosOut_altered, chan, pitch, random_vel)
+
+  local take = reaper.MIDIEditor_GetTake(hwnd)
+  local retval, notes, ccs, sysex = reaper.MIDI_CountEvts(take)
+
+  local min_vel = tonumber(GUI.Val("min_velocity_tb")) or 1
+  local max_vel = tonumber(GUI.Val("max_velocity_tb")) or 127
+
+  -- Clamp to 1–127 and correct inverted values
+  min_vel = math.max(1, math.min(min_vel, 127))
+  max_vel = math.max(1, math.min(max_vel, 127))
+  if min_vel > max_vel then min_vel, max_vel = max_vel, min_vel end
+
+  local alter_pos = GUI.Val("alter_pos_radio")
+
+  for n = 0, notes - 1 do
+    local retval, sel, muted, startppqposOut, endppqPosOut, chan, pitch, vel = reaper.MIDI_GetNote(take, n)
+    if sel then
+      local random_vel = get_random_vel(min_vel, max_vel)
+      local start_altered, end_altered = startppqposOut, endppqPosOut
+      if alter_pos == 1 then
+        start_altered, end_altered = get_altered_pos(startppqposOut, endppqPosOut)
+      end
+
+      -- Ensure valid note length
+      if start_altered >= end_altered then
+        end_altered = start_altered + 1
+      end
+
+      reaper.MIDI_SetNote(take, n, sel, muted, start_altered, end_altered, chan, pitch, random_vel)
     end
   end
 end
-  
 
 -- GUI section
 GUI.New("min_velocity_tb", "Textbox", {
